@@ -3,13 +3,12 @@ from flask_cors import CORS
 from flask_sockets import Sockets
 
 app = Flask(__name__)
-CORS(app)  # allow cross-origin requests
+CORS(app)
 sockets = Sockets(app)
 
-# Keep track of WebSocket clients
 clients = []
 
-# ===== WEBSOCKET =====
+# WebSocket for ESP32
 @sockets.route('/ws')
 def ws_route(ws):
     clients.append(ws)
@@ -21,13 +20,13 @@ def ws_route(ws):
     finally:
         clients.remove(ws)
 
-# ===== HTTP POST endpoint for frontend buttons =====
+# POST endpoint for frontend buttons
 @app.route('/command', methods=['POST'])
 def command():
     data = request.get_json()
     cmd = data.get("action")  # "on" or "off"
 
-    # Broadcast command to all connected clients (ESP32)
+    # Broadcast to connected ESP32 clients
     for ws in clients:
         try:
             ws.send(cmd)
@@ -36,12 +35,6 @@ def command():
 
     return jsonify({"status": "ok", "command": cmd})
 
-# Optional GET endpoint to check last command
-@app.route('/command', methods=['GET'])
-def get_command():
-    return jsonify({"command": "unknown"})
-
-# ===== RUN SERVER =====
 if __name__ == "__main__":
     import os
     port = int(os.environ.get("PORT", 443))
