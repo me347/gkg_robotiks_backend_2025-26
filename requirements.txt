@@ -1,5 +1,5 @@
 flask
-flask-sockets
 flask-cors
+flask-sockets
 gevent
 gevent-websocket
