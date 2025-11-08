@@ -2,18 +2,15 @@ from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
-# in-memory store
-data_store = {}
+command = None
 
-@app.route('/data', methods=['POST'])
-def post_data():
-    payload = request.get_json()
-    data_store['value'] = payload.get('value')
-    return jsonify({'status': 'ok'})
+@app.route('/command', methods=['POST'])
+def set_command():
+    global command
+    data = request.get_json()
+    command = data.get('action')
+    return jsonify({'status': 'ok', 'command': command})
 
-@app.route('/data', methods=['GET'])
-def get_data():
-    return jsonify({'value': data_store.get('value', None)})
-
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=10000)
+@app.route('/command', methods=['GET'])
+def get_command():
+    return jsonify({'command': command})
