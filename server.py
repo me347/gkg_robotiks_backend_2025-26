@@ -1,31 +1,61 @@
-from flask import Flask, request
-from flask_socketio import SocketIO, emit
+import asyncio
+import json
+from aiohttp import web
+import websockets
 
-app = Flask(__name__)
-socketio = SocketIO(app, cors_allowed_origins="*")  # Allow cross-origin requests
+# ===== CONFIG =====
+WS_PORT = 8765  # WebSocket server port
+HTTP_PORT = 8080  # HTTP server port
 
-# ===== HTTP POST endpoint for frontend buttons =====
-@app.route('/command', methods=['POST'])
-def command():
-    data = request.get_json()
-    cmd = data.get("action")  # "on" or "off"
-    
-    # Broadcast command to all connected clients (ESP32)
-    socketio.emit("command", {"action": cmd})
-    print(f"Broadcasting command: {cmd}")
-    return {"status": "ok", "command": cmd}
+# Keep track of connected ESP32 clients
+connected_clients = set()
 
-# ===== SocketIO events =====
-@socketio.on("connect")
-def handle_connect():
-    print("Client connected")
 
-@socketio.on("disconnect")
-def handle_disconnect():
-    print("Client disconnected")
+# ===== WEBSOCKET SERVER =====
+async def ws_handler(ws, path):
+    print(f"ESP32 connected: {ws.remote_address}")
+    connected_clients.add(ws)
+    try:
+        async for message in ws:
+            print(f"Received from ESP32: {message}")
+    except websockets.exceptions.ConnectionClosed:
+        print("ESP32 disconnected")
+    finally:
+        connected_clients.remove(ws)
 
-# ===== Run server =====
+
+# Start WebSocket server
+ws_server = websockets.serve(ws_handler, "0.0.0.0", WS_PORT)
+
+# ===== HTTP SERVER =====
+async def handle_command(request):
+    data = await request.json()
+    cmd = data.get("action")
+    print(f"Received command from frontend: {cmd}")
+
+    # Broadcast to all connected ESP32s
+    for ws in connected_clients.copy():
+        try:
+            await ws.send(cmd)
+        except:
+            pass
+
+    return web.json_response({"status": "ok", "command": cmd})
+
+
+app = web.Application()
+app.router.add_post("/command", handle_command)
+
+
+# ===== RUN BOTH SERVERS =====
+async def main():
+    await asyncio.gather(
+        ws_server,
+        web._run_app(app, port=HTTP_PORT),
+    )
+
+
 if __name__ == "__main__":
-    import os
-    port = int(os.environ.get("PORT", 5000))
-    socketio.run(app, host="0.0.0.0", port=port)
+    print(f"Starting WebSocket server on port {WS_PORT}...")
+    print(f"Starting HTTP server on port {HTTP_PORT}...")
+    asyncio.run(main())
