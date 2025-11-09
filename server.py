@@ -1,61 +1,47 @@
 import asyncio
-import json
-from aiohttp import web
 import websockets
+from flask import Flask, request, jsonify
+from flask_cors import CORS
 
-# ===== CONFIG =====
-WS_PORT = 8765  # WebSocket server port
-HTTP_PORT = 8080  # HTTP server port
+# Flask setup for frontend POSTs
+app = Flask(__name__)
+CORS(app)
 
-# Keep track of connected ESP32 clients
-connected_clients = set()
+# Store latest button state from frontend
+button_state = {"pressed": False}
 
+@app.route("/button", methods=["POST"])
+def button():
+    global button_state
+    data = request.json
+    button_state["pressed"] = data.get("pressed", False)
+    return jsonify({"status": "ok", "pressed": button_state["pressed"]})
 
-# ===== WEBSOCKET SERVER =====
-async def ws_handler(ws, path):
-    print(f"ESP32 connected: {ws.remote_address}")
-    connected_clients.add(ws)
+# WebSocket handler for ESP32
+async def ws_handler(websocket, path):
+    print(f"ESP32 connected: {websocket.remote_address}")
     try:
-        async for message in ws:
-            print(f"Received from ESP32: {message}")
-    except websockets.exceptions.ConnectionClosed:
+        while True:
+            # Send latest button state every 50ms
+            await websocket.send(str(button_state["pressed"]))
+            await asyncio.sleep(0.05)
+    except websockets.ConnectionClosed:
         print("ESP32 disconnected")
-    finally:
-        connected_clients.remove(ws)
 
+# Main entrypoint to start both Flask and WebSocket server
+def main():
+    import threading
 
-# Start WebSocket server
-ws_server = websockets.serve(ws_handler, "0.0.0.0", WS_PORT)
+    # Start Flask in a separate thread
+    def run_flask():
+        app.run(host="0.0.0.0", port=5000)
 
-# ===== HTTP SERVER =====
-async def handle_command(request):
-    data = await request.json()
-    cmd = data.get("action")
-    print(f"Received command from frontend: {cmd}")
+    flask_thread = threading.Thread(target=run_flask)
+    flask_thread.start()
 
-    # Broadcast to all connected ESP32s
-    for ws in connected_clients.copy():
-        try:
-            await ws.send(cmd)
-        except:
-            pass
-
-    return web.json_response({"status": "ok", "command": cmd})
-
-
-app = web.Application()
-app.router.add_post("/command", handle_command)
-
-
-# ===== RUN BOTH SERVERS =====
-async def main():
-    await asyncio.gather(
-        ws_server,
-        web._run_app(app, port=HTTP_PORT),
-    )
-
+    # Start WebSocket server in asyncio
+    WS_PORT = 8765
+    asyncio.run(websockets.serve(ws_handler, "0.0.0.0", WS_PORT))
 
 if __name__ == "__main__":
-    print(f"Starting WebSocket server on port {WS_PORT}...")
-    print(f"Starting HTTP server on port {HTTP_PORT}...")
-    asyncio.run(main())
+    main()
